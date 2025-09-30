@@ -21,6 +21,7 @@ export interface Config {
   allowUserSuggestions: boolean;
   adminPermission: string;
   enableImageMenu: boolean;
+  defaultItems: MenuItem[];
 }
 
 // 创建配置Schema
@@ -30,7 +31,70 @@ export const Config: Schema<Config> = Schema.object({
   itemsPerPage: Schema.number().min(5).max(50).default(10).description('每页显示菜单项数量'),
   allowUserSuggestions: Schema.boolean().default(true).description('允许用户建议新菜单项'),
   adminPermission: Schema.string().default('menu.admin').description('菜单管理权限'),
-  enableImageMenu: Schema.boolean().default(false).description('启用图片菜单')
+  enableImageMenu: Schema.boolean().default(false).description('启用图片菜单'),
+  defaultItems: Schema.array(
+    Schema.object({
+      id: Schema.string().required().description('菜单项ID'),
+      name: Schema.string().required().description('菜单项名称'),
+      description: Schema.string().required().description('菜单项描述'),
+      command: Schema.string().required().description('菜单项命令'),
+      category: Schema.string().required().description('菜单项分类'),
+      enabled: Schema.boolean().default(true).description('是否启用'),
+      order: Schema.number().default(1).description('显示顺序'),
+      permissions: Schema.array(Schema.string()).default([]).description('权限要求')
+    })
+  ).default([
+    {
+      id: 'signin',
+      name: '签到',
+      description: '每日签到获取积分',
+      command: '#签到',
+      category: '日常',
+      enabled: true,
+      order: 1,
+      permissions: []
+    },
+    {
+      id: 'hitokoto',
+      name: '一言',
+      description: '获取一条随机名言或句子',
+      command: '#一言',
+      category: '娱乐',
+      enabled: true,
+      order: 2,
+      permissions: []
+    },
+    {
+      id: 'music',
+      name: '点歌',
+      description: '点播指定歌曲',
+      command: '#点歌 [歌曲]',
+      category: '娱乐',
+      enabled: true,
+      order: 3,
+      permissions: []
+    },
+    {
+      id: 'domain',
+      name: '域名查询',
+      description: '查询域名信息',
+      command: '#域名 [域名]',
+      category: '工具',
+      enabled: true,
+      order: 4,
+      permissions: []
+    },
+    {
+      id: 'server',
+      name: '服务器状态',
+      description: '查询服务器状态信息',
+      command: '#服务器 (地址)',
+      category: '工具',
+      enabled: true,
+      order: 5,
+      permissions: []
+    }
+  ]).description('默认菜单项配置')
 });
 
 // 插件名称
@@ -53,64 +117,22 @@ export const usage = `
 - **menu.category** - 分类管理
 
 ### 配置说明
-在插件配置中可以设置默认分类、分页大小等参数。
+在插件配置中可以设置：
+- 默认分类名称
+- 是否启用分类显示
+- 每页显示菜单项数量
+- 是否允许用户建议新菜单项
+- 菜单管理权限
+- 是否启用图片菜单
+- **默认菜单项配置** - 可以直接在配置区编辑默认菜单项的名称、描述、命令、分类、启用状态和显示顺序
 `;
 
 export function apply(ctx: Context, config: Config) {
   // 初始化菜单数据存储
   const menuItems = new Map<string, MenuItem>();
   
-  // 添加一些默认菜单项
-  const defaultItems: MenuItem[] = [
-    {
-      id: 'signin',
-      name: '签到',
-      description: '每日签到获取积分',
-      command: '#签到',
-      category: '日常',
-      enabled: true,
-      order: 1
-    },
-    {
-      id: 'hitokoto',
-      name: '一言',
-      description: '获取一条随机名言或句子',
-      command: '#一言',
-      category: '娱乐',
-      enabled: true,
-      order: 2
-    },
-    {
-      id: 'music',
-      name: '点歌',
-      description: '点播指定歌曲',
-      command: '#点歌 [歌曲]',
-      category: '娱乐',
-      enabled: true,
-      order: 3
-    },
-    {
-      id: 'domain',
-      name: '域名查询',
-      description: '查询域名信息',
-      command: '#域名 [域名]',
-      category: '工具',
-      enabled: true,
-      order: 4
-    },
-    {
-      id: 'server',
-      name: '服务器状态',
-      description: '查询服务器状态信息',
-      command: '#服务器 (地址)',
-      category: '工具',
-      enabled: true,
-      order: 5
-    }
-  ];
-
-  // 初始化默认菜单项
-  defaultItems.forEach(item => menuItems.set(item.id, item));
+  // 使用配置中的默认菜单项
+  config.defaultItems.forEach(item => menuItems.set(item.id, item));
 
   // 权限检查辅助函数
   async function checkPermission(session: any, permission: string): Promise<boolean> {
