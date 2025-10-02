@@ -1,9 +1,10 @@
 {
   "name": "koishi-plugin-my-menu",
   "description": "功能强大的菜单管理插件，支持文本和图片菜单显示",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
+  "type": "commonjs",
   "files": [
     "lib",
     "dist"
