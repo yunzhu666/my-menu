@@ -1,31 +1,32 @@
-// src/index.ts
-import { Context, Schema, h } from 'koishi';
-import {} from 'koishi-plugin-puppeteer';
 
-// 定义菜单项接口
-export interface MenuItem {
-  id: string;
-  name: string;
-  description: string;
-  command: string;
-  category: string;
-  enabled: boolean;
-  order: number;
-  permissions?: string[];
-}
+import { Context, Schema, h } from 'koishi'
+import {} from 'koishi-plugin-puppeteer'
 
-// 定义插件配置结构
+export const name = 'my-menu'
+export const inject = ['puppeteer']
+
 export interface Config {
-  defaultCategory: string;
-  enableCategories: boolean;
-  itemsPerPage: number;
-  allowUserSuggestions: boolean;
-  adminPermission: string;
-  enableImageMenu: boolean;
-  defaultItems: MenuItem[];
+  defaultCategory: string
+  enableCategories: boolean
+  itemsPerPage: number
+  allowUserSuggestions: boolean
+  adminPermission: string
+  enableImageMenu: boolean
+  imageFooterText: string
+  imageWidth: number
+  imageColumnWidth: number
+  defaultItems: Array<{
+    id: string
+    name: string
+    description: string
+    command: string
+    category: string
+    enabled: boolean
+    order: number
+    permissions: string[]
+  }>
 }
 
-// 创建配置Schema
 export const Config: Schema<Config> = Schema.object({
   defaultCategory: Schema.string().default('通用功能').description('默认分类名称'),
   enableCategories: Schema.boolean().default(true).description('启用分类显示'),
@@ -33,18 +34,19 @@ export const Config: Schema<Config> = Schema.object({
   allowUserSuggestions: Schema.boolean().default(true).description('允许用户建议新菜单项'),
   adminPermission: Schema.string().default('menu.admin').description('菜单管理权限'),
   enableImageMenu: Schema.boolean().default(false).description('启用图片菜单'),
-  defaultItems: Schema.array(
-    Schema.object({
-      id: Schema.string().required().description('菜单项ID'),
-      name: Schema.string().required().description('菜单项名称'),
-      description: Schema.string().required().description('菜单项描述'),
-      command: Schema.string().required().description('菜单项命令'),
-      category: Schema.string().required().description('菜单项分类'),
-      enabled: Schema.boolean().default(true).description('是否启用'),
-      order: Schema.number().default(1).description('显示顺序'),
-      permissions: Schema.array(Schema.string()).default([]).description('权限要求')
-    })
-  ).default([
+  imageFooterText: Schema.string().default('菜单管理插件 | 使用 menu -i 查看图片菜单').description('图片底部额外信息'),
+  imageWidth: Schema.number().min(800).max(2000).default(1600).description('图片生成宽度（像素），影响多列布局效果'),
+  imageColumnWidth: Schema.number().min(200).max(600).default(400).description('每列最小宽度（像素），宽度除以此值计算列数'),
+  defaultItems: Schema.array(Schema.object({
+    id: Schema.string().required().description('菜单项ID'),
+    name: Schema.string().required().description('菜单项名称'),
+    description: Schema.string().required().description('菜单项描述'),
+    command: Schema.string().required().description('菜单项命令'),
+    category: Schema.string().required().description('菜单项分类'),
+    enabled: Schema.boolean().default(true).description('是否启用'),
+    order: Schema.number().default(1).description('显示顺序'),
+    permissions: Schema.array(Schema.string()).default([]).description('权限要求')
+  })).default([
     {
       id: 'signin',
       name: '签到',
@@ -96,88 +98,56 @@ export const Config: Schema<Config> = Schema.object({
       permissions: []
     }
   ]).description('默认菜单项配置')
-});
-
-// 插件名称
-export const name = 'menu-manager';
-
-// 插件使用说明
-export const usage = `
-## 🎯 菜单管理插件使用指南
-
-### 基本命令
-- **menu** - 显示完整的菜单
-- **menu -i** - 以图片形式显示菜单
-- **menu.add <名称> <命令>** - 添加新菜单项（需要管理权限）
-- **menu.list [分类]** - 列出指定分类的菜单项
-- **menu.search <关键词>** - 搜索菜单项
-
-### 管理命令（需要权限）
-- **menu.edit <ID>** - 编辑菜单项
-- **menu.delete <ID>** - 删除菜单项
-- **menu.toggle <ID>** - 启用/禁用菜单项
-- **menu.category** - 分类管理
-
-### 图片菜单功能
-插件支持将菜单内容渲染为精美的图片格式，提供更好的视觉体验：
-
-**使用方式：**
-- 使用 \`menu -i\` 命令以图片形式显示菜单
-- 在插件配置中启用 \`enableImageMenu\` 选项，让所有菜单命令默认使用图片格式
-- 支持分类显示、分页功能和搜索过滤
-
-**图片特性：**
-- 精美的渐变背景和卡片式布局
-- 响应式设计，适配不同屏幕尺寸
-- 支持中文字体显示
-- 包含分页信息和统计信息
-
-### 配置说明
-在插件配置中可以设置：
-- 默认分类名称
-- 是否启用分类显示
-- 每页显示菜单项数量
-- 是否允许用户建议新菜单项
-- 菜单管理权限
-- **是否启用图片菜单** - 控制是否默认使用图片格式显示菜单
-- **默认菜单项配置** - 可以直接在配置区编辑默认菜单项的名称、描述、命令、分类、启用状态和显示顺序
-
-### 依赖要求
-图片菜单功能需要安装并启用 \`koishi-plugin-puppeteer\` 插件
-`;
-
-export const inject = ['puppeteer'];
+})
 
 export function apply(ctx: Context, config: Config) {
-  // 初始化菜单数据存储
-  const menuItems = new Map<string, MenuItem>();
-  
-  // 使用配置中的默认菜单项
-  config.defaultItems.forEach(item => menuItems.set(item.id, item));
+  // 检查 puppeteer 服务是否可用
+  if (!ctx.puppeteer) {
+    console.warn('puppeteer 服务未找到，图片菜单功能将不可用。请安装并启用 koishi-plugin-puppeteer 插件。')
+  }
 
+  // 初始化菜单数据存储
+  const menuItems = new Map()
+  // 使用配置中的默认菜单项
+  config.defaultItems.forEach(item => menuItems.set(item.id, item))
   // 权限检查辅助函数
-  async function checkPermission(session: any, permission: string): Promise<boolean> {
+  async function checkPermission(session, permission) {
     // 方法1: 使用 session 的权限字段（如果存在）
     if (session.user?.authority && session.user.authority >= 3) {
-      return true;
+      return true
     }
     // 方法2: 使用 Koishi 的权限系统（如果配置了权限插件）
     try {
       // 尝试使用 ctx.permissions 检查权限
       if (ctx.permissions) {
-        return await ctx.permissions.test(permission, session);
+        return await ctx.permissions.test(permission, session)
       }
-    } catch (error) {
+    }
+    catch (error) {
       // 如果权限系统不可用，回退到基于用户ID的简单检查
-      console.warn('权限系统不可用，使用基于用户ID的简单检查');
+      console.warn('权限系统不可用，使用基于用户ID的简单检查')
     }
     // 方法3: 简单的管理员ID检查（生产环境中应该配置更安全的权限系统）
-    const adminUsers = ['123456789', '987654321']; // 替换为实际的管理员用户ID
-    return adminUsers.includes(session.userId);
+    const adminUsers = ['123456789', '987654321'] // 替换为实际的管理员用户ID
+    return adminUsers.includes(session.userId)
   }
-
   // 生成菜单图片的辅助函数
-  async function generateMenuImage(items: MenuItem[], page: number, totalPages: number, category?: string): Promise<Buffer> {
+  async function generateMenuImage(items, pageNum, totalPages, category, all = false) {
+    if (!ctx.puppeteer) {
+      throw new Error('puppeteer 服务不可用，无法生成图片菜单')
+    }
+
+    // 计算动态列数
+    const columns = Math.floor(config.imageWidth / config.imageColumnWidth)
+    const flexBasis = `calc(${100 / columns}% - ${12 / columns}px)`
+    const gapSize = 12
+
+    // 构建下一页提示
+    let nextPageHint = ''
+    if (!all && totalPages > 1 && pageNum < totalPages) {
+      nextPageHint = `<div class="next-page-hint">📄 下一页: menu -p ${pageNum + 1}${category ? ` -c ${category}` : ''} -i</div>`
+    }
+
     const html = `
 <!DOCTYPE html>
 <html>
@@ -188,16 +158,16 @@ export function apply(ctx: Context, config: Config) {
       font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       margin: 0;
-      padding: 30px;
+      padding: 8px;
       color: #333;
       min-height: 100vh;
     }
     .container {
-      max-width: 800px;
+      max-width: 1100px;
       margin: 0 auto;
       background: rgba(255, 255, 255, 0.95);
-      border-radius: 20px;
-      padding: 30px;
+      border-radius: 15px;
+      padding: 18px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     }
     .header {
@@ -207,36 +177,45 @@ export function apply(ctx: Context, config: Config) {
       padding-bottom: 15px;
     }
     .title {
-      font-size: 32px;
+      font-size: 40px;
       font-weight: bold;
       color: #667eea;
       margin: 0;
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
     }
     .subtitle {
-      font-size: 16px;
+      font-size: 20px;
       color: #666;
-      margin-top: 5px;
+      margin-top: 8px;
     }
     .category {
       margin-bottom: 25px;
     }
     .category-title {
-      font-size: 20px;
+      font-size: 24px;
       font-weight: bold;
       color: #764ba2;
       margin-bottom: 15px;
       padding-left: 10px;
       border-left: 4px solid #764ba2;
     }
+    .menu-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: ${gapSize}px;
+      margin-bottom: 15px;
+    }
     .menu-item {
+      flex: 1 1 ${flexBasis};
       background: white;
       border-radius: 12px;
-      padding: 15px;
-      margin-bottom: 15px;
+      padding: 14px;
       border: 2px solid #e9ecef;
       transition: all 0.3s ease;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
     }
     .menu-item:hover {
       border-color: #667eea;
@@ -244,25 +223,26 @@ export function apply(ctx: Context, config: Config) {
       box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     }
     .item-name {
-      font-size: 18px;
+      font-size: 22px;
       font-weight: bold;
       color: #333;
-      margin-bottom: 5px;
+      margin-bottom: 8px;
     }
     .item-description {
-      font-size: 14px;
+      font-size: 18px;
       color: #666;
-      margin-bottom: 8px;
-      line-height: 1.4;
+      margin-bottom: 10px;
+      line-height: 1.5;
     }
     .item-command {
-      font-size: 13px;
+      font-size: 16px;
       color: #667eea;
       font-family: 'Courier New', monospace;
       background: #f8f9fa;
-      padding: 5px 10px;
+      padding: 6px 12px;
       border-radius: 6px;
       display: inline-block;
+      word-break: break-all;
     }
     .footer {
       text-align: center;
@@ -270,11 +250,29 @@ export function apply(ctx: Context, config: Config) {
       padding-top: 20px;
       border-top: 2px solid #e9ecef;
       color: #666;
-      font-size: 14px;
+      font-size: 18px;
+      line-height: 1.6;
+      white-space: pre-line;
+      word-wrap: break-word;
+    }
+    .footer div {
+      margin-bottom: 8px;
     }
     .page-info {
       font-weight: bold;
       color: #667eea;
+    }
+    .next-page-hint {
+      margin-top: 10px;
+      color: #667eea;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .full-menu-indicator {
+      color: #28a745;
+      font-weight: bold;
+      font-size: 16px;
+      margin-bottom: 10px;
     }
   </style>
 </head>
@@ -285,11 +283,24 @@ export function apply(ctx: Context, config: Config) {
       ${category ? `<div class="subtitle">分类: ${category}</div>` : ''}
     </div>
 
-    ${config.enableCategories ? 
+    ${config.enableCategories ?
       [...new Set(items.map(item => item.category))].map(cat => `
         <div class="category">
           <div class="category-title">📁 ${cat}</div>
-          ${items.filter(item => item.category === cat).map(item => `
+          <div class="menu-grid">
+            ${items.filter(item => item.category === cat).map(item => `
+              <div class="menu-item">
+                <div class="item-name">• ${item.name}</div>
+                <div class="item-description">${item.description}</div>
+                <div class="item-command">💡 使用: ${item.command}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('') :
+      `
+        <div class="menu-grid">
+          ${items.map(item => `
             <div class="menu-item">
               <div class="item-name">• ${item.name}</div>
               <div class="item-description">${item.description}</div>
@@ -297,121 +308,135 @@ export function apply(ctx: Context, config: Config) {
             </div>
           `).join('')}
         </div>
-      `).join('') : 
-      items.map(item => `
-        <div class="menu-item">
-          <div class="item-name">• ${item.name}</div>
-          <div class="item-description">${item.description}</div>
-          <div class="item-command">💡 使用: ${item.command}</div>
-        </div>
-      `).join('')
-    }
+      `}
 
     <div class="footer">
-      ${totalPages > 1 ? `<div>第 <span class="page-info">${page}</span> / <span class="page-info">${totalPages}</span> 页</div>` : ''}
-      <div style="margin-top: 10px;">菜单管理插件 | 共 ${items.length} 个功能</div>
+      ${totalPages > 1 ? `<div>第 <span class="page-info">${pageNum}</span> / <span class="page-info">${totalPages}</span> 页</div>` : ''}
+      ${all ? '<div class="full-menu-indicator">📋 完整菜单（不分页）</div>' : ''}
+      ${nextPageHint}
+      <div>${config.imageFooterText}</div>
     </div>
   </div>
 </body>
 </html>
-    `;
+    `
 
-    const result = await ctx.puppeteer.render(html);
-    return Buffer.from(result);
+    const browserPage = await ctx.puppeteer.page()
+    try {
+      await browserPage.setViewport({ width: config.imageWidth, height: 2000 })
+      await browserPage.setContent(html, { waitUntil: 'networkidle0' })
+      
+      const buffer = await browserPage.screenshot({
+        type: 'png',
+        fullPage: true,
+        encoding: 'binary'
+      })
+      
+      return buffer
+    } catch (error) {
+      console.error('Puppeteer screenshot error:', error)
+      throw error
+    } finally {
+      await browserPage.close()
+    }
   }
-
   // 主菜单命令
   ctx.command('menu', '显示功能菜单')
     .option('category', '-c <category:string> 指定分类')
     .option('page', '-p <page:number> 页码')
     .option('image', '-i 以图片形式显示菜单')
+    .option('all', '-a 显示所有菜单项（不分页）')
     .action(async ({ session, options }) => {
-      const { category, page = 1, image } = options;
+      const { category, page = 1, image, all } = options
       let filteredItems = Array.from(menuItems.values())
-        .filter(item => item.enabled);
-      
+        .filter(item => item.enabled)
       // 按分类过滤
       if (category) {
-        filteredItems = filteredItems.filter(item => 
-          item.category.toLowerCase().includes(category.toLowerCase())
-        );
+        filteredItems = filteredItems.filter(item => item.category.toLowerCase().includes(category.toLowerCase()))
       }
-      
       // 按顺序排序
-      filteredItems.sort((a, b) => a.order - b.order);
+      filteredItems.sort((a, b) => a.order - b.order)
       
-      // 分页处理
-      const startIndex = (page - 1) * config.itemsPerPage;
-      const endIndex = startIndex + config.itemsPerPage;
-      const pageItems = filteredItems.slice(startIndex, endIndex);
+      // 不分页处理
+      let pageItems, currentPage, totalPagesValue
+      if (all) {
+        pageItems = filteredItems
+        currentPage = 1
+        totalPagesValue = 1
+      } else {
+        // 分页处理
+        const startIndex = (page - 1) * config.itemsPerPage
+        const endIndex = startIndex + config.itemsPerPage
+        pageItems = filteredItems.slice(startIndex, endIndex)
+        currentPage = page
+        totalPagesValue = Math.ceil(filteredItems.length / config.itemsPerPage)
+      }
       
       if (pageItems.length === 0) {
-        return `没有找到菜单项${category ? `在分类"${category}"中` : ''}。`;
+        return `没有找到菜单项${category ? `在分类"${category}"中` : ''}。`
       }
-      
-      // 构建菜单显示
-      const useImage = image || config.enableImageMenu;
-      
-      if (useImage) {
-        try {
-          const imageBuffer = await generateMenuImage(pageItems, page, Math.ceil(filteredItems.length / config.itemsPerPage), category);
-          return h.image(imageBuffer, 'image/png');
-        } catch (error) {
-          console.error('生成菜单图片失败:', error);
-          return '生成图片菜单失败，请检查puppeteer服务是否正常运行。';
+        // 构建菜单显示
+        const useImage = image || config.enableImageMenu
+        if (useImage) {
+          if (!ctx.puppeteer) {
+            return '图片菜单功能不可用，请安装并启用 koishi-plugin-puppeteer 插件。'
+          }
+          try {
+            const imageBuffer = await generateMenuImage(pageItems, currentPage, totalPagesValue, category, all)
+            return h.image(imageBuffer, 'image/png')
+          }
+          catch (error) {
+            console.error('生成菜单图片失败:', error)
+            return '生成图片菜单失败，请检查puppeteer服务是否正常运行。'
+          }
         }
-      }
-      
-      let output = '📋 功能菜单\n\n';
-      
+      let output = '📋 功能菜单\n\n'
       if (config.enableCategories) {
-        const categories = [...new Set(pageItems.map(item => item.category))];
+        const categories = [...new Set(pageItems.map(item => item.category))]
         for (const cat of categories) {
-          output += `📁 ${cat}\n`;
-          const categoryItems = pageItems.filter(item => item.category === cat);
+          output += `📁 ${cat}\n`
+          const categoryItems = pageItems.filter(item => item.category === cat)
           categoryItems.forEach(item => {
-            output += `  • ${item.name} - ${item.description}\n`;
-            output += `    💡 使用: ${item.command}\n\n`;
-          });
+            output += `  • ${item.name} - ${item.description}\n`
+            output += `    💡 使用: ${item.command}\n\n`
+          })
         }
-      } else {
+      }
+      else {
         pageItems.forEach(item => {
-          output += `• ${item.name} - ${item.description}\n`;
-          output += `  💡 使用: ${item.command}\n\n`;
-        });
+          output += `• ${item.name} - ${item.description}\n`
+          output += `  💡 使用: ${item.command}\n\n`
+        })
       }
-      
       // 添加分页信息
-      const totalPages = Math.ceil(filteredItems.length / config.itemsPerPage);
-      if (totalPages > 1) {
-        output += `\n第 ${page}/${totalPages} 页，使用 menu -p ${page + 1} 查看下一页`;
+      const totalPagesForText = Math.ceil(filteredItems.length / config.itemsPerPage)
+      if (totalPagesForText > 1) {
+        output += `\n第 ${page}/${totalPagesForText} 页，使用 menu -p ${page + 1} 查看下一页`
       }
-      
       // 提示图片菜单功能
       if (!useImage) {
-        output += `\n\n💡 提示: 使用 menu -i 以图片形式显示菜单`;
+        output += `\n\n💡 提示: 使用 menu -i 以图片形式显示菜单`
       }
-      
-      return output;
-    });
-
+      return output
+    })
   // 添加菜单项命令（需要权限）
   ctx.command('menu.add <name:string> <command:string>', '添加新菜单项')
     .option('description', '-d <desc:string> 描述信息')
     .option('category', '-c <cat:string> 分类名称')
     .option('order', '-o <order:number> 显示顺序')
-    .action(({ session, options }, name, command) => {
+    .action(async ({ session, options }, name, command) => {
       if (!name || !command) {
-        return '请输入菜单项名称和命令。';
+        return '请输入菜单项名称和命令。'
       }
-      
       // 权限检查
-      if (!session?.userId || !checkPermission(session, config.adminPermission)) {
-        return '您没有权限执行此操作。';
+      if (!session?.userId || !(await checkPermission(session, config.adminPermission))) {
+        return '您没有权限执行此操作。'
       }
-      
-      const id = generateId(name);
-      const newItem: MenuItem = {
+      const id = name.toLowerCase()
+        .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') + '-' + Date.now().toString(36)
+      const newItem = {
         id,
         name,
         description: options.description || '暂无描述',
@@ -419,104 +444,81 @@ export function apply(ctx: Context, config: Config) {
         category: options.category || config.defaultCategory,
         enabled: true,
         order: options.order || menuItems.size + 1
-      };
-      
-      menuItems.set(id, newItem);
-      return `✅ 菜单项 "${name}" 添加成功！ID: ${id}`;
-    });
-
+      }
+      menuItems.set(id, newItem)
+      return `✅ 菜单项 "${name}" 添加成功！ID: ${id}`
+    })
   // 列出菜单项命令
   ctx.command('menu.list [category:string]', '列出菜单项')
     .action(({ session }, category) => {
-      let items = Array.from(menuItems.values());
-      
+      let items = Array.from(menuItems.values())
       if (category) {
-        items = items.filter(item => 
-          item.category.toLowerCase().includes(category.toLowerCase())
-        );
+        items = items.filter(item => item.category.toLowerCase().includes(category.toLowerCase()))
       }
-      
       if (items.length === 0) {
-        return `没有找到${category ? `分类"${category}"的` : ''}菜单项。`;
+        return `没有找到${category ? `分类"${category}"的` : ''}菜单项。`
       }
-      
-      let output = `📋 菜单项列表${category ? ` (分类: ${category})` : ''}\n\n`;
+      let output = `📋 菜单项列表${category ? ` (分类: ${category})` : ''}\n\n`
       items.sort((a, b) => a.order - b.order).forEach(item => {
-        output += `🆔 ${item.id}\n`;
-        output += `📛 名称: ${item.name}\n`;
-        output += `📖 描述: ${item.description}\n`;
-        output += `⚡ 命令: ${item.command}\n`;
-        output += `📁 分类: ${item.category}\n`;
-        output += `📊 顺序: ${item.order}\n`;
-        output += `🔧 状态: ${item.enabled ? '✅ 启用' : '❌ 禁用'}\n`;
-        output += '─'.repeat(20) + '\n';
-      });
-      
-      return output;
-    });
-
+        output += `🆔 ${item.id}\n`
+        output += `📛 名称: ${item.name}\n`
+        output += `📖 描述: ${item.description}\n`
+        output += `⚡ 命令: ${item.command}\n`
+        output += `📁 分类: ${item.category}\n`
+        output += `📊 顺序: ${item.order}\n`
+        output += `🔧 状态: ${item.enabled ? '✅ 启用' : '❌ 禁用'}\n`
+        output += '─'.repeat(20) + '\n'
+      })
+      return output
+    })
   // 搜索菜单项命令
   ctx.command('menu.search <keyword:string>', '搜索菜单项')
     .action(({ session }, keyword) => {
       if (!keyword) {
-        return '请输入搜索关键词。';
+        return '请输入搜索关键词。'
       }
-      
-      const results = Array.from(menuItems.values()).filter(item =>
-        item.name.toLowerCase().includes(keyword.toLowerCase()) ||
+      const results = Array.from(menuItems.values()).filter(item => item.name.toLowerCase().includes(keyword.toLowerCase()) ||
         item.description.toLowerCase().includes(keyword.toLowerCase()) ||
         item.command.toLowerCase().includes(keyword.toLowerCase()) ||
-        item.category.toLowerCase().includes(keyword.toLowerCase())
-      );
-      
+        item.category.toLowerCase().includes(keyword.toLowerCase()))
       if (results.length === 0) {
-        return `没有找到包含"${keyword}"的菜单项。`;
+        return `没有找到包含"${keyword}"的菜单项。`
       }
-      
-      let output = `🔍 搜索结果 (关键词: "${keyword}")\n\n`;
+      let output = `🔍 搜索结果 (关键词: "${keyword}")\n\n`
       results.forEach(item => {
-        output += `• ${item.name} - ${item.description}\n`;
-        output += `  💡 使用: ${item.command}\n`;
-        output += `  📁 分类: ${item.category}\n\n`;
-      });
-      
-      return output;
-    });
-
+        output += `• ${item.name} - ${item.description}\n`
+        output += `  💡 使用: ${item.command}\n`
+        output += `  📁 分类: ${item.category}\n\n`
+      })
+      return output
+    })
   // 切换菜单项状态命令（需要权限）
   ctx.command('menu.toggle <id:string>', '启用/禁用菜单项')
-    .action(({ session }, id) => {
-      if (!session?.userId || !checkPermission(session, config.adminPermission)) {
-        return '您没有权限执行此操作。';
+    .action(async ({ session }, id) => {
+      if (!session?.userId || !(await checkPermission(session, config.adminPermission))) {
+        return '您没有权限执行此操作。'
       }
-      
-      const item = menuItems.get(id);
+      const item = menuItems.get(id)
       if (!item) {
-        return `未找到ID为"${id}"的菜单项。`;
+        return `未找到ID为"${id}"的菜单项。`
       }
-      
-      item.enabled = !item.enabled;
-      menuItems.set(id, item);
-      
-      return `✅ 菜单项 "${item.name}" 已${item.enabled ? '启用' : '禁用'}。`;
-    });
-
+      item.enabled = !item.enabled
+      menuItems.set(id, item)
+      return `✅ 菜单项 "${item.name}" 已${item.enabled ? '启用' : '禁用'}。`
+    })
   // 删除菜单项命令（需要权限）
   ctx.command('menu.delete <id:string>', '删除菜单项')
-    .action(({ session }, id) => {
-      if (!session?.userId || !checkPermission(session, config.adminPermission)) {
-        return '您没有权限执行此操作。';
+    .action(async ({ session }, id) => {
+      if (!session?.userId || !(await checkPermission(session, config.adminPermission))) {
+        return '您没有权限执行此操作。'
       }
-      
-      const item = menuItems.get(id);
+      const item = menuItems.get(id)
       if (!item) {
-        return `未找到ID为"${id}"的菜单项。`;
+        return `未找到ID为"${id}"的菜单项。`
       }
-      
-      menuItems.delete(id);
-      return `✅ 菜单项 "${item.name}" 已删除。`;
-    });
-
+      menuItems.delete(id)
+      return `✅ 菜单项 "${item.name}" 已删除。`
+    })
   // 编辑菜单项命令（需要权限）
   ctx.command('menu.edit <id:string>', '编辑菜单项')
     .option('name', '-n <name:string> 新名称')
@@ -524,55 +526,52 @@ export function apply(ctx: Context, config: Config) {
     .option('command', '-c <command:string> 新命令')
     .option('category', '-cat <category:string> 新分类')
     .option('order', '-o <order:number> 新顺序')
-    .action(({ session, options }, id) => {
-      if (!session?.userId || !checkPermission(session, config.adminPermission)) {
-        return '您没有权限执行此操作。';
+    .action(async ({ session, options }, id) => {
+      if (!session?.userId || !(await checkPermission(session, config.adminPermission))) {
+        return '您没有权限执行此操作。'
       }
-      
-      const item = menuItems.get(id);
+      const item = menuItems.get(id)
       if (!item) {
-        return `未找到ID为"${id}"的菜单项。`;
+        return `未找到ID为"${id}"的菜单项。`
       }
-      
       // 更新字段
-      if (options.name) item.name = options.name;
-      if (options.description) item.description = options.description;
-      if (options.command) item.command = options.command;
-      if (options.category) item.category = options.category;
-      if (options.order) item.order = options.order;
-      
-      menuItems.set(id, item);
-      return `✅ 菜单项 "${item.name}" 更新成功！`;
-    });
-
+      if (options.name)
+        item.name = options.name
+      if (options.description)
+        item.description = options.description
+      if (options.command)
+        item.command = options.command
+      if (options.category)
+        item.category = options.category
+      if (options.order)
+        item.order = options.order
+      menuItems.set(id, item)
+      return `✅ 菜单项 "${item.name}" 更新成功！`
+    })
   // 分类管理命令（需要权限）
   ctx.command('menu.category', '分类管理')
     .subcommand('.list', '列出所有分类')
     .action(({ session }) => {
-      const categories = [...new Set(Array.from(menuItems.values()).map(item => item.category))];
+      const categories = [...new Set(Array.from(menuItems.values()).map(item => item.category))]
       if (categories.length === 0) {
-        return '暂无分类。';
+        return '暂无分类。'
       }
-      return `📁 所有分类:\n${categories.map(cat => `• ${cat}`).join('\n')}`;
+      return `📁 所有分类:\n${categories.map(cat => `• ${cat}`).join('\n')}`
     })
     .subcommand('.change <id:string> <newCategory:string>', '更改菜单项分类')
-    .action(({ session }, id, newCategory) => {
-      if (!session?.userId || !checkPermission(session, config.adminPermission)) {
-        return '您没有权限执行此操作。';
+    .action(async ({ session }, id, newCategory) => {
+      if (!session?.userId || !(await checkPermission(session, config.adminPermission))) {
+        return '您没有权限执行此操作。'
       }
-      
-      const item = menuItems.get(id);
+      const item = menuItems.get(id)
       if (!item) {
-        return `未找到ID为"${id}"的菜单项。`;
+        return `未找到ID为"${id}"的菜单项。`
       }
-      
-      const oldCategory = item.category;
-      item.category = newCategory;
-      menuItems.set(id, item);
-      
-      return `✅ 菜单项 "${item.name}" 已从"${oldCategory}"移动到"${newCategory}"。`;
-    });
-
+      const oldCategory = item.category
+      item.category = newCategory
+      menuItems.set(id, item)
+      return `✅ 菜单项 "${item.name}" 已从"${oldCategory}"移动到"${newCategory}"。`
+    })
   // 用户建议功能
   if (config.allowUserSuggestions) {
     ctx.command('menu.suggest <name:string> <command:string>', '建议新菜单项')
@@ -585,25 +584,14 @@ export function apply(ctx: Context, config: Config) {
           description: options.description || '暂无描述',
           userId: session.userId,
           timestamp: new Date().toISOString()
-        };
-        
+        }
         // 这里可以添加将建议保存到数据库的逻辑
-        console.log('用户建议:', suggestion);
-        
-        return `📝 感谢您的建议！菜单项 "${name}" 已提交给管理员审核。`;
-      });
+        console.log('用户建议:', suggestion)
+        return `📝 感谢您的建议！菜单项 "${name}" 已提交给管理员审核。`
+      })
   }
-
-  // 生成唯一ID的辅助函数
-  function generateId(name: string): string {
-    return name.toLowerCase()
-      .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '') + '-' + Date.now().toString(36);
-  }
-
   // 插件卸载时清理资源
   ctx.on('dispose', () => {
-    menuItems.clear();
-  });
+    menuItems.clear()
+  })
 }
