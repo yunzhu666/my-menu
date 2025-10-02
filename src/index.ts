@@ -1,5 +1,6 @@
 // src/index.ts
 import { Context, Schema, h } from 'koishi';
+import {} from 'koishi-plugin-puppeteer';
 
 // 定义菜单项接口
 export interface MenuItem {
@@ -106,6 +107,7 @@ export const usage = `
 
 ### 基本命令
 - **menu** - 显示完整的菜单
+- **menu -i** - 以图片形式显示菜单
 - **menu.add <名称> <命令>** - 添加新菜单项（需要管理权限）
 - **menu.list [分类]** - 列出指定分类的菜单项
 - **menu.search <关键词>** - 搜索菜单项
@@ -116,6 +118,20 @@ export const usage = `
 - **menu.toggle <ID>** - 启用/禁用菜单项
 - **menu.category** - 分类管理
 
+### 图片菜单功能
+插件支持将菜单内容渲染为精美的图片格式，提供更好的视觉体验：
+
+**使用方式：**
+- 使用 \`menu -i\` 命令以图片形式显示菜单
+- 在插件配置中启用 \`enableImageMenu\` 选项，让所有菜单命令默认使用图片格式
+- 支持分类显示、分页功能和搜索过滤
+
+**图片特性：**
+- 精美的渐变背景和卡片式布局
+- 响应式设计，适配不同屏幕尺寸
+- 支持中文字体显示
+- 包含分页信息和统计信息
+
 ### 配置说明
 在插件配置中可以设置：
 - 默认分类名称
@@ -123,9 +139,14 @@ export const usage = `
 - 每页显示菜单项数量
 - 是否允许用户建议新菜单项
 - 菜单管理权限
-- 是否启用图片菜单
+- **是否启用图片菜单** - 控制是否默认使用图片格式显示菜单
 - **默认菜单项配置** - 可以直接在配置区编辑默认菜单项的名称、描述、命令、分类、启用状态和显示顺序
+
+### 依赖要求
+图片菜单功能需要安装并启用 \`koishi-plugin-puppeteer\` 插件
 `;
+
+export const inject = ['puppeteer'];
 
 export function apply(ctx: Context, config: Config) {
   // 初始化菜单数据存储
@@ -155,12 +176,157 @@ export function apply(ctx: Context, config: Config) {
     return adminUsers.includes(session.userId);
   }
 
+  // 生成菜单图片的辅助函数
+  async function generateMenuImage(items: MenuItem[], page: number, totalPages: number, category?: string): Promise<Buffer> {
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin: 0;
+      padding: 30px;
+      color: #333;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 3px solid #667eea;
+      padding-bottom: 15px;
+    }
+    .title {
+      font-size: 32px;
+      font-weight: bold;
+      color: #667eea;
+      margin: 0;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .subtitle {
+      font-size: 16px;
+      color: #666;
+      margin-top: 5px;
+    }
+    .category {
+      margin-bottom: 25px;
+    }
+    .category-title {
+      font-size: 20px;
+      font-weight: bold;
+      color: #764ba2;
+      margin-bottom: 15px;
+      padding-left: 10px;
+      border-left: 4px solid #764ba2;
+    }
+    .menu-item {
+      background: white;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 15px;
+      border: 2px solid #e9ecef;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    .menu-item:hover {
+      border-color: #667eea;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    .item-name {
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 5px;
+    }
+    .item-description {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .item-command {
+      font-size: 13px;
+      color: #667eea;
+      font-family: 'Courier New', monospace;
+      background: #f8f9fa;
+      padding: 5px 10px;
+      border-radius: 6px;
+      display: inline-block;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 2px solid #e9ecef;
+      color: #666;
+      font-size: 14px;
+    }
+    .page-info {
+      font-weight: bold;
+      color: #667eea;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 class="title">📋 功能菜单</h1>
+      ${category ? `<div class="subtitle">分类: ${category}</div>` : ''}
+    </div>
+
+    ${config.enableCategories ? 
+      [...new Set(items.map(item => item.category))].map(cat => `
+        <div class="category">
+          <div class="category-title">📁 ${cat}</div>
+          ${items.filter(item => item.category === cat).map(item => `
+            <div class="menu-item">
+              <div class="item-name">• ${item.name}</div>
+              <div class="item-description">${item.description}</div>
+              <div class="item-command">💡 使用: ${item.command}</div>
+            </div>
+          `).join('')}
+        </div>
+      `).join('') : 
+      items.map(item => `
+        <div class="menu-item">
+          <div class="item-name">• ${item.name}</div>
+          <div class="item-description">${item.description}</div>
+          <div class="item-command">💡 使用: ${item.command}</div>
+        </div>
+      `).join('')
+    }
+
+    <div class="footer">
+      ${totalPages > 1 ? `<div>第 <span class="page-info">${page}</span> / <span class="page-info">${totalPages}</span> 页</div>` : ''}
+      <div style="margin-top: 10px;">菜单管理插件 | 共 ${items.length} 个功能</div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const result = await ctx.puppeteer.render(html);
+    return Buffer.from(result);
+  }
+
   // 主菜单命令
   ctx.command('menu', '显示功能菜单')
     .option('category', '-c <category:string> 指定分类')
     .option('page', '-p <page:number> 页码')
-    .action(({ session, options }) => {
-      const { category, page = 1 } = options;
+    .option('image', '-i 以图片形式显示菜单')
+    .action(async ({ session, options }) => {
+      const { category, page = 1, image } = options;
       let filteredItems = Array.from(menuItems.values())
         .filter(item => item.enabled);
       
@@ -184,8 +350,16 @@ export function apply(ctx: Context, config: Config) {
       }
       
       // 构建菜单显示
-      if (config.enableImageMenu) {
-        return '图片菜单功能暂未实现，敬请期待！';
+      const useImage = image || config.enableImageMenu;
+      
+      if (useImage) {
+        try {
+          const imageBuffer = await generateMenuImage(pageItems, page, Math.ceil(filteredItems.length / config.itemsPerPage), category);
+          return h.image(imageBuffer, 'image/png');
+        } catch (error) {
+          console.error('生成菜单图片失败:', error);
+          return '生成图片菜单失败，请检查puppeteer服务是否正常运行。';
+        }
       }
       
       let output = '📋 功能菜单\n\n';
@@ -211,6 +385,11 @@ export function apply(ctx: Context, config: Config) {
       const totalPages = Math.ceil(filteredItems.length / config.itemsPerPage);
       if (totalPages > 1) {
         output += `\n第 ${page}/${totalPages} 页，使用 menu -p ${page + 1} 查看下一页`;
+      }
+      
+      // 提示图片菜单功能
+      if (!useImage) {
+        output += `\n\n💡 提示: 使用 menu -i 以图片形式显示菜单`;
       }
       
       return output;

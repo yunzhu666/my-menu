@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-my-menu",
-  "description": "这是一个自定义菜单",
-  "version": "0.0.1",
+  "description": "功能强大的菜单管理插件，支持文本和图片菜单显示",
+  "version": "1.0.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -9,14 +9,32 @@
     "dist"
   ],
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
   "keywords": [
     "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "menu",
+    "puppeteer",
+    "image-render"
   ],
-  "devDependencies": {},
+  "devDependencies": {
+    "koishi-plugin-puppeteer": "^3.9.0",
+    "typescript": "^5.6.2"
+  },
   "peerDependencies": {
     "koishi": "^4.18.7"
+  },
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yunzhu666/my-menu"
+  },
+  "homepage": "https://github.com/yunzhu666/my-menu#readme",
+  "bugs": {
+    "url": "https://github.com/yunzhu666/my-menu/issues"
   }
 }
